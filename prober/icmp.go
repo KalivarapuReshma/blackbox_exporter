@@ -18,6 +18,8 @@ import (
 	"context"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,10 +50,21 @@ func ProbeICMP(ctx context.Context, target string, module config.Module, registr
 		socket      *icmp.PacketConn
 		requestType icmp.Type
 		replyType   icmp.Type
+		payload     int64
 	)
 	timeoutDeadline, _ := ctx.Deadline()
 	deadline := time.Now().Add(timeoutDeadline.Sub(time.Now()))
 
+	split := strings.Split(target, " ")
+	target = split[0]
+	if len(split) > 1 {
+		p, err := strconv.ParseInt(split[1], 10, 32)
+		if err != nil {
+			level.Info(logger).Log("msg", "Invalid paylaod value")
+		} else {
+			payload = p
+		}
+	}
 	ip, err := chooseProtocol(module.ICMP.PreferredIPProtocol, target, registry, logger)
 	if err != nil {
 		level.Warn(logger).Log("msg", "Error resolving address", "err", err)
@@ -75,10 +88,18 @@ func ProbeICMP(ctx context.Context, target string, module config.Module, registr
 	}
 	defer socket.Close()
 
+	var data []byte
+	if payload != 0 {
+		data := make([]byte, payload)
+		copy(data[:], "Prometheus Blackbox Exporter")
+	} else {
+		data = []byte("Prometheus Blackbox Exporter")
+	}
+
 	body := &icmp.Echo{
 		ID:   os.Getpid() & 0xffff,
 		Seq:  int(getICMPSequence()),
-		Data: []byte("Prometheus Blackbox Exporter"),
+		Data: data,
 	}
 	level.Info(logger).Log("msg", "Creating ICMP packet", "seq", body.Seq, "id", body.ID)
 	wm := icmp.Message{
